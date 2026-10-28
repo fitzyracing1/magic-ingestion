@@ -194,3 +194,7 @@ def test_candidates_are_family_tagged():
     assert families.family_for_candidate({"source": "wayback", "text": "Y2K Interactive Teleconference"}) == "security"
     assert families.family_for_candidate({"source": "wayback", "text": "review archived page x"}) == "data"
     assert families.family_for_candidate({"source": "github-gfi", "text": "read good first issue: x"}) == "humans"
+
+
+def test_classify_uses_word_starts():
+    assert families.classify("Plugin for LogBlock", "humans") == "software"

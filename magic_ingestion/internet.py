@@ -143,9 +143,15 @@ def gharchive(f: Fetcher, hour: str, limit: int = 5) -> List[dict]:
             if p.get("action") != "opened":
                 continue
             iss = p.get("issue", {})
-            title = iss.get("title", "") if isinstance(iss, dict) else ""
-            url = iss.get("html_url", "") if isinstance(iss, dict) else ""
             year = (ev.get("created_at") or hour)[:4]
+            if isinstance(iss, dict):
+                title, url = iss.get("title", ""), iss.get("html_url", "")
+            else:  # pre-2015 timeline format: issue is an id, no title
+                repo = ev.get("repository") or {}
+                url = ev.get("url", "")
+                title = f"#{iss} in {repo.get('owner', '?')}/{repo.get('name', '?')}"
+                if repo.get("description"):
+                    title += f" ({repo['description']})"
             out.append(_cand("history", "gharchive", str(ev.get("id")),
                              f"old issue from {year}: {title}", url, year=year))
             if len(out) >= limit:

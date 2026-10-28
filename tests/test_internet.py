@@ -214,3 +214,13 @@ def test_wayback_range_from_magic_json(tmp_path):
     (tmp_path / "magic.json").write_text(json.dumps({"wayback_from": "1997", "wayback_to": "1998"}))
     c = core.Config.load(tmp_path)
     assert (c.wayback_from, c.wayback_to) == ("1997", "1998")
+
+
+def test_gharchive_pre2015_format():
+    ev = {"type": "IssuesEvent", "created_at": "2012-09-05T12:00:08-07:00", "url": "https://github.com/m/s/issues/77",
+          "repository": {"owner": "m", "name": "s", "description": "Scrummy"}, "payload": {"action": "opened", "issue": 123}}
+    raw = gzip.compress(json.dumps(ev).encode())
+    f = internet.Fetcher(getter=lambda u, h, t: raw, min_interval=0)
+    c = internet.gharchive(f, "2012-09-05-12")
+    assert c[0]["text"] == "old issue from 2012: #123 in m/s (Scrummy)"
+    assert c[0]["url"] == "https://github.com/m/s/issues/77" and c[0]["year"] == 2012

@@ -223,10 +223,11 @@ SOURCE_FAMILY = {"github-ci": "software", "github-gfi": "humans", "pypi": "softw
 
 def classify(text: str, default: str = "data") -> str:
     """Pick a family for free text by keyword (first family with most hits)."""
+    import re
     t = text.lower()
     best, score = default, 0
     for fam, v in NEEDS_MAP.items():
-        s = sum(1 for k in v["keywords"] if k in t)
+        s = sum(1 for k in v["keywords"] if re.search(r"\b" + re.escape(k.strip()), t))
         if s > score:
             best, score = fam, s
     return best
