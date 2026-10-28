@@ -1,0 +1,18 @@
+{
+  "power":          {"label": "Power",              "kinds": ["battery_low", "thermal_hot"],
+                     "keywords": ["battery", "power", "thermal", "cooling", "heat", "fan", "watt"]},
+  "compute":        {"label": "Compute",            "kinds": ["cpu_load_high", "tick_late"],
+                     "keywords": ["cpu", "processor", "mhz", "pentium", "load", "schedul", "tick", "performance"]},
+  "memory_storage": {"label": "Memory & storage",   "kinds": ["ram_low", "disk_low", "backup_stale"],
+                     "keywords": ["memory", "ram", "disk", "storage", "backup", "cd-rom", "drive", "gb", "mb "]},
+  "network":        {"label": "Network",            "kinds": ["offline", "dns_fail", "time_unsynced"],
+                     "keywords": ["modem", "dial-up", "network", "connect", "broadband", "dns", "wifi", "kbps", "bandwidth", "intranet"]},
+  "data":           {"label": "Data",               "kinds": ["stale_input", "archive_bloat"],
+                     "keywords": ["archive", "data", "search", "index", "stale", "cache"]},
+  "software":       {"label": "Software",           "kinds": ["updates_pending", "dependency_unpinned", "ci_dark"],
+                     "keywords": ["update", "upgrade", "release", "version", "install", "download", "patch", "kernel", "browser", "plugin", "dependency", "build", "ci"]},
+  "security":       {"label": "Security",           "kinds": ["patches_pending", "secret_permissions"],
+                     "keywords": ["security", "virus", "secure", "encrypt", "password", "vulnerab", "y2k", "year 2000", "permission", "certificate", "https"]},
+  "humans":         {"label": "Humans & purpose",   "kinds": ["tasks_pending", "feedback_waiting", "approval_waiting", "human_need", "probe_error"],
+                     "keywords": ["help", "issue", "feedback", "community", "teacher", "school", "user", "approve", "question"]}
+}

@@ -15,4 +15,4 @@ magic = "magic_ingestion.cli:main"
 packages = ["magic_ingestion"]
 
 [tool.setuptools.package-data]
-magic_ingestion = ["tree.json"]
+magic_ingestion = ["tree.json", "needs-map.json", "solutions.json"]

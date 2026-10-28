@@ -50,6 +50,25 @@ class Config:
     ci_command: Optional[List[str]] = None  # argv list; nonzero exit = dark CI light
     seed: int = 0
     tree_path: Path = DEFAULT_TREE
+    # family probes
+    sys_root: str = "/"
+    battery_min: int = 15
+    thermal_max_c: float = 85.0
+    load_factor: float = 2.0
+    tick_late_seconds: float = 6 * 3600
+    ram_min_pct: float = 5.0
+    backup_paths: List[str] = field(default_factory=list)
+    backup_hours: float = 48.0
+    dns_host: Optional[str] = None
+    net_check: Optional[List] = None  # [host, port]
+    archive_dir: Optional[str] = None
+    archive_max: int = 100
+    requirements_files: List[str] = field(default_factory=list)
+    secret_paths: List[str] = field(default_factory=list)
+    feedback_file: Optional[str] = None
+    approvals_file: Optional[str] = None
+    remind_proposals: bool = False
+    log_rotate_bytes: int = 1_000_000
     # internet candidates (TRIANGLE): builtin | live | history | all
     source: str = "builtin"
     owner: Optional[str] = None
@@ -91,6 +110,10 @@ class Config:
         return self.workdir / "internet_tasks.jsonl"
 
     @property
+    def proposals_path(self) -> Path:
+        return self.workdir / "proposals.jsonl"
+
+    @property
     def temp_dir(self) -> Path:
         return self.workdir / "tmp"
 
@@ -101,7 +124,11 @@ class Config:
         f = workdir / "magic.json"
         if f.exists():
             data = json.loads(f.read_text(encoding="utf-8"))
-            for k in ("min_free_bytes", "stale_hours", "stale_files", "queue_file", "seed",
+            for k in ("min_free_bytes", "stale_hours", "stale_files", "queue_file", "seed", "sys_root", "battery_min",
+                      "thermal_max_c", "load_factor", "tick_late_seconds", "ram_min_pct",
+                      "backup_paths", "backup_hours", "dns_host", "net_check", "archive_dir",
+                      "archive_max", "requirements_files", "secret_paths", "feedback_file",
+                      "approvals_file", "remind_proposals", "log_rotate_bytes",
                       "source", "owner", "pypi_packages", "npm_packages", "wayback_urls", "wayback_from", "wayback_to", "wayback_limit", "wayback_collapse",
                       "swh_origins", "gharchive_hour", "cache_ttl", "rate_limit", "timeout"):
                 if k in data:
@@ -163,19 +190,32 @@ PROBES: Dict[str, Probe] = {
     "stale": probe_stale,
     "queue": probe_queue,
     "ci": probe_ci,
-}
+}  # legacy single probes; default COAX uses families.FAMILY_PROBES
+
+
+def default_probes() -> Dict[str, Probe]:
+    from .families import FAMILY_PROBES
+    return dict(FAMILY_PROBES)
 
 
 def coax(cfg: Config, probes: Optional[Dict[str, Probe]] = None) -> List[dict]:
-    """Ask every probe 'what do you need?'. Return proposed needs."""
+    """Ask every probe 'what do you need?'. Return proposed needs, tagged by family.
+
+    A probe may return None, a string (kind = probe name), or a list of (kind, text)."""
+    from .families import KIND_TO_FAMILY
     needs = []
-    for name, probe in (probes or PROBES).items():
+    for name, probe in (probes or default_probes()).items():
         try:
-            text = probe(cfg)
+            got = probe(cfg)
         except Exception as e:  # a broken probe is itself a need
-            text = f"probe {name} failed: {e}"
-        if text:
-            needs.append({"source": name, "text": text})
+            got = [("probe_error", f"probe {name} failed: {e}")]
+        if not got:
+            continue
+        if isinstance(got, str):
+            got = [(name, got)]
+        for kind, text in got:
+            fam = KIND_TO_FAMILY.get(kind, name if name in KIND_TO_FAMILY.values() else "humans")
+            needs.append({"source": name, "family": fam, "kind": kind, "text": text})
     return needs
 
 
@@ -184,14 +224,18 @@ def ingest(cfg: Config, needs: List[dict]) -> List[dict]:
     """The computer types its needs into the queue as plain-text lines."""
     written = []
     for n in needs:
-        rec = {"ts": now(), "source": n["source"], "text": str(n["text"]), "status": "pending"}
+        rec = {"ts": now(), "source": n["source"], "text": str(n["text"]), "status": "pending",
+               "family": n.get("family", "humans"), "kind": n.get("kind", "human_need")}
+        for k in ("url",):
+            if n.get(k):
+                rec[k] = n[k]
         _append_jsonl(cfg.needs_path, rec)
         written.append(rec)
     return written
 
 
 def add_human_need(cfg: Config, text: str) -> dict:
-    return ingest(cfg, [{"source": "human", "text": text}])[0]
+    return ingest(cfg, [{"source": "human", "family": "humans", "kind": "human_need", "text": text}])[0]
 
 
 def pending_needs(cfg: Config) -> List[dict]:
@@ -249,8 +293,15 @@ def leaf_at(tree: dict, path: List[int]) -> str:
 
 def record_candidate(cfg: Config, cand: dict) -> str:
     """READ-ONLY: write the candidate down as a task record. Never executed or contacted."""
+    from .families import family_for_candidate
+    cand = {**cand, "family": cand.get("family") or family_for_candidate(cand)}
     _append_jsonl(cfg.internet_tasks_path, {"ts": now(), **cand})
-    return f"recorded {cand.get('branch', '?')} task: {cand['text']}"
+    if cand.get("source") == "github-ci":  # dark CI: propose the throwaway-fork fix plan only
+        from .solve import SOLUTIONS, propose
+        propose(cfg, {"family": "software", "kind": "ci_dark", "text": cand["text"]},
+                SOLUTIONS["ci_dark"]["steps"], {"url": cand.get("url", "")})
+        return f"recorded dark CI task and proposed fork-branch fix plan: {cand['text']}"
+    return f"recorded {cand['family']} {cand.get('branch', '?')} task: {cand['text']}"
 
 
 def triangle_tree(cfg: Config, fetcher=None) -> dict:
@@ -353,11 +404,13 @@ def once(cfg: Config, probes: Optional[Dict[str, Probe]] = None, fetcher=None) -
     needs = pending_needs(cfg)
     if needs:
         for n in needs:
+            from .solve import solve                     # SOLVE
             try:
-                ok, detail = True, handle_need(cfg, n)
+                ok, mode, detail = solve(cfg, n)
             except Exception as e:
-                ok, detail = False, str(e)
-            results.append(set_result(cfg, "need", n["source"], ok, detail, need_ts=n["ts"]))
+                ok, mode, detail = False, "auto", f"{type(e).__name__}: {e}"
+            results.append(set_result(cfg, "need", n["source"], ok, detail, need_ts=n["ts"],
+                                      family=n.get("family"), need_kind=n.get("kind"), solution=mode))
         return results
     cycle = _load_cycle(cfg)                          # 3
     tree = triangle_tree(cfg, fetcher)

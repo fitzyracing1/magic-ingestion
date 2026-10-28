@@ -60,8 +60,10 @@ class Fetcher:
 
 
 def _cand(branch: str, source: str, key: str, text: str, url: str = "", year=None) -> dict:
+    from .families import family_for_candidate
     c = {"id": f"{source}:{key}", "branch": branch, "source": source,
          "text": str(text)[:300], "url": url}
+    c["family"] = family_for_candidate(c)
     if year:
         c["year"] = int(year)
     return c

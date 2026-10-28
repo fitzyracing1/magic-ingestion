@@ -11,6 +11,8 @@ from magic_ingestion import core, cli, LIT, DARK
 def cfg(tmp_path):
     c = core.Config(workdir=tmp_path.resolve())
     c.min_free_bytes = 0
+    (tmp_path / "sysroot").mkdir()
+    c.sys_root = str(tmp_path / "sysroot")  # isolate from the real host
     return c
 
 
@@ -22,7 +24,7 @@ def test_coax_quiet_when_nothing_needed(cfg):
 def test_coax_disk_low(cfg):
     cfg.min_free_bytes = 10**30
     needs = core.coax(cfg)
-    assert any(n["source"] == "disk" for n in needs)
+    assert any(n["kind"] == "disk_low" and n["family"] == "memory_storage" for n in needs)
 
 
 def test_coax_stale_file(cfg):
@@ -32,14 +34,14 @@ def test_coax_stale_file(cfg):
     os.utime(f, (old, old))
     cfg.stale_files = ["old.txt"]
     cfg.stale_hours = 1
-    assert [n["source"] for n in core.coax(cfg)] == ["stale"]
+    assert [(n["family"], n["kind"]) for n in core.coax(cfg)] == [("data", "stale_input")]
 
 
 def test_coax_queue_pending(cfg):
     (cfg.workdir / "q.txt").write_text("a\nb\n")
     cfg.queue_file = "q.txt"
     needs = core.coax(cfg)
-    assert needs[0]["source"] == "queue" and "2 pending" in needs[0]["text"]
+    assert needs[0]["kind"] == "tasks_pending" and "2 pending" in needs[0]["text"]
 
 
 def test_coax_ci_dark_and_lit(cfg):

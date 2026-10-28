@@ -59,6 +59,8 @@ class FakeGet:
 def cfg(tmp_path):
     c = core.Config(workdir=tmp_path.resolve())
     c.min_free_bytes = 0
+    (tmp_path / "sysroot").mkdir()
+    c.sys_root = str(tmp_path / "sysroot")
     c.owner = "fitzyracing1"
     c.pypi_packages = ["requests"]
     c.npm_packages = ["left-pad"]
