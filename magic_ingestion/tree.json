@@ -1,0 +1,11 @@
+{
+  "name": "root",
+  "children": [
+    {"name": "housekeeping", "children": [
+      {"task": "tidy_temp"}, {"task": "summarize_log"}, {"task": "self_test"}]},
+    {"name": "insight", "children": [
+      {"task": "summarize_log"}, {"task": "self_test"}, {"task": "tidy_temp"}]},
+    {"name": "health", "children": [
+      {"task": "self_test"}, {"task": "tidy_temp"}, {"task": "summarize_log"}]}
+  ]
+}

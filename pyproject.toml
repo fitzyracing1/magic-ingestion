@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magic-ingestion"
+version = "0.1.0"
+description = "The computer types up its own needs: coax, ingest, triangle, set."
+requires-python = ">=3.9"
+
+[project.scripts]
+magic = "magic_ingestion.cli:main"
+
+[tool.setuptools]
+packages = ["magic_ingestion"]
+
+[tool.setuptools.package-data]
+magic_ingestion = ["tree.json"]
