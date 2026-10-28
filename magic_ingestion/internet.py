@@ -106,9 +106,15 @@ def npm_meta(f: Fetcher, pkg: str) -> List[dict]:
 
 
 # ---------------------------------------------------------------- history
-def wayback(f: Fetcher, url: str, limit: int = 3, since: str = "1996") -> List[dict]:
-    q = urllib.parse.urlencode({"url": url, "output": "json", "from": since,
-                                "limit": limit, "fl": "timestamp,original,statuscode"})
+def wayback(f: Fetcher, url: str, limit: int = 3, since: str = "1996",
+            until: Optional[str] = None, collapse: Optional[str] = None) -> List[dict]:
+    params = {"url": url, "output": "json", "from": since, "limit": limit,
+              "fl": "timestamp,original,statuscode", "filter": "statuscode:200"}
+    if until:
+        params["to"] = until
+    if collapse:
+        params["collapse"] = collapse  # e.g. "timestamp:4" = one snapshot per year
+    q = urllib.parse.urlencode(params)
     rows = f.json(f"https://web.archive.org/cdx/search/cdx?{q}")
     out = []
     for row in rows[1:]:  # first row is the header
@@ -172,7 +178,8 @@ def gather(cfg, f: Fetcher, mode: str = "all") -> Dict[str, object]:
             jobs.append((f"npm:{p}", lambda p=p: npm_meta(f, p)))
     if mode in ("all", "history"):
         for u in cfg.wayback_urls:
-            jobs.append((f"wayback:{u}", lambda u=u: wayback(f, u)))
+            jobs.append((f"wayback:{u}", lambda u=u: wayback(f, u, cfg.wayback_limit, cfg.wayback_from, cfg.wayback_to,
+                                                  cfg.wayback_collapse)))
         if cfg.gharchive_hour:
             jobs.append(("gharchive", lambda: gharchive(f, cfg.gharchive_hour)))
         for o in cfg.swh_origins:

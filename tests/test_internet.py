@@ -197,3 +197,18 @@ def test_cli_fetch(cfg, monkeypatch, capsys):
     assert cli.main(["--workdir", str(cfg.workdir), "fetch", "--history"]) == 0
     assert "from 1998" in capsys.readouterr().out
     assert cli.main(["--workdir", str(cfg.workdir), "run", "--once", "--source", "history"]) == 0
+
+
+def test_wayback_date_range(cfg):
+    cfg.wayback_from, cfg.wayback_to, cfg.wayback_limit = "1996", "1999", 2
+    get = FakeGet()
+    internet.gather(cfg, fetcher(get), "history")
+    u = [x for x in get.urls if "cdx" in x][0]
+    assert "from=1996" in u and "to=1999" in u and "limit=2" in u
+    assert "collapse=timestamp%3A4" in u
+
+
+def test_wayback_range_from_magic_json(tmp_path):
+    (tmp_path / "magic.json").write_text(json.dumps({"wayback_from": "1997", "wayback_to": "1998"}))
+    c = core.Config.load(tmp_path)
+    assert (c.wayback_from, c.wayback_to) == ("1997", "1998")

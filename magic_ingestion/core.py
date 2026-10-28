@@ -56,6 +56,10 @@ class Config:
     pypi_packages: List[str] = field(default_factory=list)
     npm_packages: List[str] = field(default_factory=list)
     wayback_urls: List[str] = field(default_factory=list)
+    wayback_from: str = "1996"  # CDX date range (yyyy[MMdd...])
+    wayback_to: Optional[str] = None
+    wayback_limit: int = 3
+    wayback_collapse: Optional[str] = "timestamp:4"
     swh_origins: List[str] = field(default_factory=list)
     gharchive_hour: Optional[str] = None  # e.g. "2012-03-10-15"
     cache_ttl: float = 3600.0
@@ -98,7 +102,7 @@ class Config:
         if f.exists():
             data = json.loads(f.read_text(encoding="utf-8"))
             for k in ("min_free_bytes", "stale_hours", "stale_files", "queue_file", "seed",
-                      "source", "owner", "pypi_packages", "npm_packages", "wayback_urls",
+                      "source", "owner", "pypi_packages", "npm_packages", "wayback_urls", "wayback_from", "wayback_to", "wayback_limit", "wayback_collapse",
                       "swh_origins", "gharchive_hour", "cache_ttl", "rate_limit", "timeout"):
                 if k in data:
                     setattr(cfg, k, data[k])

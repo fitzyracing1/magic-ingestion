@@ -52,7 +52,7 @@ magic fetch --history
 magic run --source all
 ```
 
-Config keys: `source`, `owner`, `pypi_packages`, `npm_packages`, `wayback_urls`, `gharchive_hour` (e.g. `"2012-03-10-15"`), `swh_origins`, `cache_ttl`, `rate_limit`, `timeout`.
+Config keys: `source`, `owner`, `pypi_packages`, `npm_packages`, `wayback_urls`, `wayback_from` / `wayback_to` (CDX date range, e.g. `"1996"`–`"1999"`), `wayback_limit`, `wayback_collapse` (default `timestamp:4`, one snapshot per year), `gharchive_hour` (e.g. `"2012-03-10-15"`), `swh_origins`, `cache_ttl`, `rate_limit`, `timeout`.
 
 Tests mock all network; CI never touches the internet.
 
