@@ -50,6 +50,40 @@ class Config:
     ci_command: Optional[List[str]] = None  # argv list; nonzero exit = dark CI light
     seed: int = 0
     tree_path: Path = DEFAULT_TREE
+    # family probes
+    sys_root: str = "/"
+    battery_min: int = 15
+    thermal_max_c: float = 85.0
+    load_factor: float = 2.0
+    tick_late_seconds: float = 6 * 3600
+    ram_min_pct: float = 5.0
+    backup_paths: List[str] = field(default_factory=list)
+    backup_hours: float = 48.0
+    dns_host: Optional[str] = None
+    net_check: Optional[List] = None  # [host, port]
+    archive_dir: Optional[str] = None
+    archive_max: int = 100
+    requirements_files: List[str] = field(default_factory=list)
+    secret_paths: List[str] = field(default_factory=list)
+    feedback_file: Optional[str] = None
+    approvals_file: Optional[str] = None
+    remind_proposals: bool = False
+    log_rotate_bytes: int = 1_000_000
+    # internet candidates (TRIANGLE): builtin | live | history | all
+    source: str = "builtin"
+    owner: Optional[str] = None
+    pypi_packages: List[str] = field(default_factory=list)
+    npm_packages: List[str] = field(default_factory=list)
+    wayback_urls: List[str] = field(default_factory=list)
+    wayback_from: str = "1996"  # CDX date range (yyyy[MMdd...])
+    wayback_to: Optional[str] = None
+    wayback_limit: int = 3
+    wayback_collapse: Optional[str] = "timestamp:4"
+    swh_origins: List[str] = field(default_factory=list)
+    gharchive_hour: Optional[str] = None  # e.g. "2012-03-10-15"
+    cache_ttl: float = 3600.0
+    rate_limit: float = 1.0
+    timeout: float = 10.0
 
     @property
     def needs_path(self) -> Path:
@@ -68,6 +102,18 @@ class Config:
         return self.workdir / "magic.log"
 
     @property
+    def candidates_path(self) -> Path:
+        return self.workdir / "candidates.json"
+
+    @property
+    def internet_tasks_path(self) -> Path:
+        return self.workdir / "internet_tasks.jsonl"
+
+    @property
+    def proposals_path(self) -> Path:
+        return self.workdir / "proposals.jsonl"
+
+    @property
     def temp_dir(self) -> Path:
         return self.workdir / "tmp"
 
@@ -78,7 +124,13 @@ class Config:
         f = workdir / "magic.json"
         if f.exists():
             data = json.loads(f.read_text(encoding="utf-8"))
-            for k in ("min_free_bytes", "stale_hours", "stale_files", "queue_file", "seed"):
+            for k in ("min_free_bytes", "stale_hours", "stale_files", "queue_file", "seed", "sys_root", "battery_min",
+                      "thermal_max_c", "load_factor", "tick_late_seconds", "ram_min_pct",
+                      "backup_paths", "backup_hours", "dns_host", "net_check", "archive_dir",
+                      "archive_max", "requirements_files", "secret_paths", "feedback_file",
+                      "approvals_file", "remind_proposals", "log_rotate_bytes",
+                      "source", "owner", "pypi_packages", "npm_packages", "wayback_urls", "wayback_from", "wayback_to", "wayback_limit", "wayback_collapse",
+                      "swh_origins", "gharchive_hour", "cache_ttl", "rate_limit", "timeout"):
                 if k in data:
                     setattr(cfg, k, data[k])
             if "ci_command" in data:
@@ -138,19 +190,32 @@ PROBES: Dict[str, Probe] = {
     "stale": probe_stale,
     "queue": probe_queue,
     "ci": probe_ci,
-}
+}  # legacy single probes; default COAX uses families.FAMILY_PROBES
+
+
+def default_probes() -> Dict[str, Probe]:
+    from .families import FAMILY_PROBES
+    return dict(FAMILY_PROBES)
 
 
 def coax(cfg: Config, probes: Optional[Dict[str, Probe]] = None) -> List[dict]:
-    """Ask every probe 'what do you need?'. Return proposed needs."""
+    """Ask every probe 'what do you need?'. Return proposed needs, tagged by family.
+
+    A probe may return None, a string (kind = probe name), or a list of (kind, text)."""
+    from .families import KIND_TO_FAMILY
     needs = []
-    for name, probe in (probes or PROBES).items():
+    for name, probe in (probes or default_probes()).items():
         try:
-            text = probe(cfg)
+            got = probe(cfg)
         except Exception as e:  # a broken probe is itself a need
-            text = f"probe {name} failed: {e}"
-        if text:
-            needs.append({"source": name, "text": text})
+            got = [("probe_error", f"probe {name} failed: {e}")]
+        if not got:
+            continue
+        if isinstance(got, str):
+            got = [(name, got)]
+        for kind, text in got:
+            fam = KIND_TO_FAMILY.get(kind, name if name in KIND_TO_FAMILY.values() else "humans")
+            needs.append({"source": name, "family": fam, "kind": kind, "text": text})
     return needs
 
 
@@ -159,14 +224,18 @@ def ingest(cfg: Config, needs: List[dict]) -> List[dict]:
     """The computer types its needs into the queue as plain-text lines."""
     written = []
     for n in needs:
-        rec = {"ts": now(), "source": n["source"], "text": str(n["text"]), "status": "pending"}
+        rec = {"ts": now(), "source": n["source"], "text": str(n["text"]), "status": "pending",
+               "family": n.get("family", "humans"), "kind": n.get("kind", "human_need")}
+        for k in ("url",):
+            if n.get(k):
+                rec[k] = n[k]
         _append_jsonl(cfg.needs_path, rec)
         written.append(rec)
     return written
 
 
 def add_human_need(cfg: Config, text: str) -> dict:
-    return ingest(cfg, [{"source": "human", "text": text}])[0]
+    return ingest(cfg, [{"source": "human", "family": "humans", "kind": "human_need", "text": text}])[0]
 
 
 def pending_needs(cfg: Config) -> List[dict]:
@@ -182,6 +251,11 @@ def load_tree(path: Path) -> dict:
 
 
 def validate_tree(node: dict) -> None:
+    if "candidate" in node:
+        c = node["candidate"]
+        if not isinstance(c, dict) or "id" not in c or "text" not in c:
+            raise ValueError("candidate leaf needs id and text")
+        return
     if "task" in node:
         if node["task"] not in TASKS:
             raise ValueError(f"unknown task {node['task']!r}")
@@ -198,7 +272,7 @@ def walk(tree: dict, cycle: int, seed: int = 0) -> List[int]:
     least-significant digit chooses at the root, so every leaf is visited."""
     n = cycle + seed
     path, node = [], tree
-    while "task" not in node:
+    while "children" in node:
         branch = n % 3
         n //= 3
         path.append(branch)
@@ -206,11 +280,45 @@ def walk(tree: dict, cycle: int, seed: int = 0) -> List[int]:
     return path
 
 
-def leaf_at(tree: dict, path: List[int]) -> str:
+def node_at(tree: dict, path: List[int]) -> dict:
     node = tree
     for b in path:
         node = node["children"][b]
-    return node["task"]
+    return node
+
+
+def leaf_at(tree: dict, path: List[int]) -> str:
+    return node_at(tree, path)["task"]
+
+
+def record_candidate(cfg: Config, cand: dict) -> str:
+    """READ-ONLY: write the candidate down as a task record. Never executed or contacted."""
+    from .families import family_for_candidate
+    cand = {**cand, "family": cand.get("family") or family_for_candidate(cand)}
+    _append_jsonl(cfg.internet_tasks_path, {"ts": now(), **cand})
+    if cand.get("source") == "github-ci":  # dark CI: propose the throwaway-fork fix plan only
+        from .solve import SOLUTIONS, propose
+        propose(cfg, {"family": "software", "kind": "ci_dark", "text": cand["text"]},
+                SOLUTIONS["ci_dark"]["steps"], {"url": cand.get("url", "")})
+        return f"recorded dark CI task and proposed fork-branch fix plan: {cand['text']}"
+    return f"recorded {cand['family']} {cand.get('branch', '?')} task: {cand['text']}"
+
+
+def triangle_tree(cfg: Config, fetcher=None) -> dict:
+    builtin = load_tree(cfg.tree_path)
+    if cfg.source == "builtin":
+        return builtin
+    from . import internet
+    try:
+        modes = ["live", "history"] if cfg.source == "all" else [cfg.source]
+        cache = {}
+        for m in modes:
+            cache = internet.refresh(cfg, fetcher, m)
+        tree = internet.internet_tree(cache.get("candidates", []), builtin, cfg.source)
+        validate_tree(tree)
+        return tree
+    except Exception:
+        return builtin  # offline or broken cache: fall back to the built-in tree
 
 
 # ---- safe built-in tasks (only ever touch cfg.workdir)
@@ -289,25 +397,31 @@ def _save_cycle(cfg: Config, cycle: int) -> None:
     cfg.state_path.write_text(json.dumps({"cycle": cycle}))
 
 
-def once(cfg: Config, probes: Optional[Dict[str, Probe]] = None) -> List[dict]:
+def once(cfg: Config, probes: Optional[Dict[str, Probe]] = None, fetcher=None) -> List[dict]:
     cfg.workdir.mkdir(parents=True, exist_ok=True)
     ingest(cfg, coax(cfg, probes))                    # 1 + 2
     results = []
     needs = pending_needs(cfg)
     if needs:
         for n in needs:
+            from .solve import solve                     # SOLVE
             try:
-                ok, detail = True, handle_need(cfg, n)
+                ok, mode, detail = solve(cfg, n)
             except Exception as e:
-                ok, detail = False, str(e)
-            results.append(set_result(cfg, "need", n["source"], ok, detail, need_ts=n["ts"]))
+                ok, mode, detail = False, "auto", f"{type(e).__name__}: {e}"
+            results.append(set_result(cfg, "need", n["source"], ok, detail, need_ts=n["ts"],
+                                      family=n.get("family"), need_kind=n.get("kind"), solution=mode))
         return results
     cycle = _load_cycle(cfg)                          # 3
-    tree = load_tree(cfg.tree_path)
+    tree = triangle_tree(cfg, fetcher)
     path = walk(tree, cycle, cfg.seed)
-    task = leaf_at(tree, path)
+    leaf = node_at(tree, path)
+    task = "internet:" + leaf["candidate"]["source"] if "candidate" in leaf else leaf["task"]
     try:
-        ok, detail = True, TASKS[task](cfg)
+        if "candidate" in leaf:
+            ok, detail = True, record_candidate(cfg, leaf["candidate"])
+        else:
+            ok, detail = True, TASKS[task](cfg)
     except Exception as e:
         ok, detail = False, f"{type(e).__name__}: {e}"
     _save_cycle(cfg, cycle + 1)

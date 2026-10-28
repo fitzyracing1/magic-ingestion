@@ -14,6 +14,12 @@ def main(argv=None) -> int:
     r.add_argument("--interval", type=float, default=60.0)
     r.add_argument("--max-cycles", type=int, default=None)
     r.add_argument("--once", action="store_true")
+    r.add_argument("--source", choices=["builtin", "live", "history", "all"], default=None,
+                   help="where TRIANGLE gets default tasks (default: magic.json or builtin)")
+    fe = sub.add_parser("fetch", help="fetch internet candidate tasks into the cache (read-only)")
+    g = fe.add_mutually_exclusive_group()
+    g.add_argument("--live", action="store_true")
+    g.add_argument("--history", action="store_true")
     sub.add_parser("once", help="run one cycle")
     n = sub.add_parser("need", help="type a need into the queue")
     n.add_argument("text")
@@ -21,6 +27,18 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     cfg = core.Config.load(Path(a.workdir))
     cfg.workdir.mkdir(parents=True, exist_ok=True)
+    if getattr(a, "source", None):
+        cfg.source = a.source
+    if a.cmd == "fetch":
+        from . import internet
+        modes = ["live"] if a.live else ["history"] if a.history else ["live", "history"]
+        for m in modes:
+            cache = internet.refresh(cfg, mode=m, force=True)
+        for c in cache["candidates"]:
+            print(f"{c['branch']}\t{c['source']}\t{c['text']}")
+        for e in cache.get("errors", []):
+            print(f"dark\t{e}")
+        return core.LIT
     if a.cmd == "once" or (a.cmd == "run" and a.once):
         res = core.once(cfg)
         for x in res:
