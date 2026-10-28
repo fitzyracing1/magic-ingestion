@@ -195,7 +195,7 @@ def test_cli_fetch(cfg, monkeypatch, capsys):
     real = internet.Fetcher.__init__
     monkeypatch.setattr(internet.Fetcher, "__init__",
                         lambda self, getter=None, **kw: real(self, getter=get, min_interval=0))
-    (cfg.workdir / "magic.json").write_text(json.dumps({"wayback_urls": ["example.com"]}))
+    (cfg.workdir / "magic.json").write_text(json.dumps({"wayback_urls": ["example.com"], "sys_root": cfg.sys_root}))
     assert cli.main(["--workdir", str(cfg.workdir), "fetch", "--history"]) == 0
     assert "from 1998" in capsys.readouterr().out
     assert cli.main(["--workdir", str(cfg.workdir), "run", "--once", "--source", "history"]) == 0

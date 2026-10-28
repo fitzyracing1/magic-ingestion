@@ -143,6 +143,7 @@ def test_run_loop_and_status(cfg):
 
 
 def test_cli_once_and_status(cfg, capsys):
+    (cfg.workdir / "magic.json").write_text(json.dumps({"sys_root": cfg.sys_root}))
     assert cli.main(["--workdir", str(cfg.workdir), "once"]) == 0
     assert "lit" in capsys.readouterr().out
     assert cli.main(["--workdir", str(cfg.workdir), "status"]) == 0
