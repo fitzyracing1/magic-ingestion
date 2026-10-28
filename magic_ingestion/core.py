@@ -50,6 +50,17 @@ class Config:
     ci_command: Optional[List[str]] = None  # argv list; nonzero exit = dark CI light
     seed: int = 0
     tree_path: Path = DEFAULT_TREE
+    # internet candidates (TRIANGLE): builtin | live | history | all
+    source: str = "builtin"
+    owner: Optional[str] = None
+    pypi_packages: List[str] = field(default_factory=list)
+    npm_packages: List[str] = field(default_factory=list)
+    wayback_urls: List[str] = field(default_factory=list)
+    swh_origins: List[str] = field(default_factory=list)
+    gharchive_hour: Optional[str] = None  # e.g. "2012-03-10-15"
+    cache_ttl: float = 3600.0
+    rate_limit: float = 1.0
+    timeout: float = 10.0
 
     @property
     def needs_path(self) -> Path:
@@ -68,6 +79,14 @@ class Config:
         return self.workdir / "magic.log"
 
     @property
+    def candidates_path(self) -> Path:
+        return self.workdir / "candidates.json"
+
+    @property
+    def internet_tasks_path(self) -> Path:
+        return self.workdir / "internet_tasks.jsonl"
+
+    @property
     def temp_dir(self) -> Path:
         return self.workdir / "tmp"
 
@@ -78,7 +97,9 @@ class Config:
         f = workdir / "magic.json"
         if f.exists():
             data = json.loads(f.read_text(encoding="utf-8"))
-            for k in ("min_free_bytes", "stale_hours", "stale_files", "queue_file", "seed"):
+            for k in ("min_free_bytes", "stale_hours", "stale_files", "queue_file", "seed",
+                      "source", "owner", "pypi_packages", "npm_packages", "wayback_urls",
+                      "swh_origins", "gharchive_hour", "cache_ttl", "rate_limit", "timeout"):
                 if k in data:
                     setattr(cfg, k, data[k])
             if "ci_command" in data:
@@ -182,6 +203,11 @@ def load_tree(path: Path) -> dict:
 
 
 def validate_tree(node: dict) -> None:
+    if "candidate" in node:
+        c = node["candidate"]
+        if not isinstance(c, dict) or "id" not in c or "text" not in c:
+            raise ValueError("candidate leaf needs id and text")
+        return
     if "task" in node:
         if node["task"] not in TASKS:
             raise ValueError(f"unknown task {node['task']!r}")
@@ -198,7 +224,7 @@ def walk(tree: dict, cycle: int, seed: int = 0) -> List[int]:
     least-significant digit chooses at the root, so every leaf is visited."""
     n = cycle + seed
     path, node = [], tree
-    while "task" not in node:
+    while "children" in node:
         branch = n % 3
         n //= 3
         path.append(branch)
@@ -206,11 +232,38 @@ def walk(tree: dict, cycle: int, seed: int = 0) -> List[int]:
     return path
 
 
-def leaf_at(tree: dict, path: List[int]) -> str:
+def node_at(tree: dict, path: List[int]) -> dict:
     node = tree
     for b in path:
         node = node["children"][b]
-    return node["task"]
+    return node
+
+
+def leaf_at(tree: dict, path: List[int]) -> str:
+    return node_at(tree, path)["task"]
+
+
+def record_candidate(cfg: Config, cand: dict) -> str:
+    """READ-ONLY: write the candidate down as a task record. Never executed or contacted."""
+    _append_jsonl(cfg.internet_tasks_path, {"ts": now(), **cand})
+    return f"recorded {cand.get('branch', '?')} task: {cand['text']}"
+
+
+def triangle_tree(cfg: Config, fetcher=None) -> dict:
+    builtin = load_tree(cfg.tree_path)
+    if cfg.source == "builtin":
+        return builtin
+    from . import internet
+    try:
+        modes = ["live", "history"] if cfg.source == "all" else [cfg.source]
+        cache = {}
+        for m in modes:
+            cache = internet.refresh(cfg, fetcher, m)
+        tree = internet.internet_tree(cache.get("candidates", []), builtin, cfg.source)
+        validate_tree(tree)
+        return tree
+    except Exception:
+        return builtin  # offline or broken cache: fall back to the built-in tree
 
 
 # ---- safe built-in tasks (only ever touch cfg.workdir)
@@ -289,7 +342,7 @@ def _save_cycle(cfg: Config, cycle: int) -> None:
     cfg.state_path.write_text(json.dumps({"cycle": cycle}))
 
 
-def once(cfg: Config, probes: Optional[Dict[str, Probe]] = None) -> List[dict]:
+def once(cfg: Config, probes: Optional[Dict[str, Probe]] = None, fetcher=None) -> List[dict]:
     cfg.workdir.mkdir(parents=True, exist_ok=True)
     ingest(cfg, coax(cfg, probes))                    # 1 + 2
     results = []
@@ -303,11 +356,15 @@ def once(cfg: Config, probes: Optional[Dict[str, Probe]] = None) -> List[dict]:
             results.append(set_result(cfg, "need", n["source"], ok, detail, need_ts=n["ts"]))
         return results
     cycle = _load_cycle(cfg)                          # 3
-    tree = load_tree(cfg.tree_path)
+    tree = triangle_tree(cfg, fetcher)
     path = walk(tree, cycle, cfg.seed)
-    task = leaf_at(tree, path)
+    leaf = node_at(tree, path)
+    task = "internet:" + leaf["candidate"]["source"] if "candidate" in leaf else leaf["task"]
     try:
-        ok, detail = True, TASKS[task](cfg)
+        if "candidate" in leaf:
+            ok, detail = True, record_candidate(cfg, leaf["candidate"])
+        else:
+            ok, detail = True, TASKS[task](cfg)
     except Exception as e:
         ok, detail = False, f"{type(e).__name__}: {e}"
     _save_cycle(cfg, cycle + 1)
